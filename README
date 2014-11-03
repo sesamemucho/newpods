@@ -1,0 +1,10 @@
+Newpods is a script that can find recently downloaded podcasts and then
+insert the proper commands to copy them to a portable player into the
+bash history list.
+
+Run newpods once to install the user's configuration file to
+$HOME/.newpodrc, and then customize it there.
+
+For more information, run 'newpods -m'.
+
+For installation instructions, see the file INSTALL.

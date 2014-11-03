@@ -1,0 +1,23 @@
+
+Linux, *BSD:
+
+    Source Install:
+    $ sudo make install
+
+Mac OS X:
+
+The 'make' program is not installed by default in OS X. Since
+'newpods' is the only file you actually need, put it wherever you
+like (or leave it in this directory).
+
+    cd .  (or wherever you put 'newpods')
+    alias newpods=". `pwd`/newpods"      <-- cut-and-paste this line into a terminal window
+    alias newpods                        <-- execute this command, then cut-and-paste the
+                                             result into your ~/.bashrc file.
+
+Configuration:
+
+After the package is installed, run it once to install the default
+configuration file into $HOME/.newpodsrc, edit it to make 'source' and
+'destinations' conform with your system.
+
