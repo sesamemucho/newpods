@@ -1,0 +1,51 @@
+Title: newpods
+Tags: software
+
+<p>
+I use <a href="http://podget.sourceforge.net">podget</a> to download
+podcasts. Since it's a command line program, it's easy to automate. I
+have it set up to run as a cron job to check for new podcasts once
+every hour. I listen to the podcasts almost exclusively on a portable
+device, currently an Android smartphone with AstroPlayer Pro.
+</p>
+<p>
+podget puts the podcasts into a directory tree. The first level of the
+tree indicates the category of the podcast. Some of the categories I
+use are SCIENCE, LINUX, and SKEPTIC. Underneath each category are
+directories that correspond to the name of the podcast. Each episode
+is saved as a file in the podcast directory.
+</p>
+<p>
+The biggest problem with using podget was in cleaning out old podcasts
+from the Android and copying new ones over. I couldn't automatically delete
+the old ones, because sometimes I want to wait to listen to a
+particular podcast, or I may take a long time to get through
+another. It was inconvenient to locate the new podcasts because podget
+downloads each podcast series into its own directory. Sounds like
+a job for a little script, right? Right! It started out as a couple of
+'find' and 'echo' commands, to find all the podcasts downloaded in the
+last 24 hours. It printed out a 'cp' command to copy all the new files
+over to the X5, and a 'pushd' command to the podcast directory on the
+device. I would copy-and-paste these commands into the terminal to
+actually perform the pushd and copying. I'd pushd to the device and
+delete the podcasts I'd already listened to, and use the copy command
+to copy over the new ones.
+</p>
+<p>
+Naturally, it needed a few more features. First, it was inconvenient
+to always check for new podcasts in the last 24 hours. If a new one
+came down at night that I just had to listen to, I'd have to manually
+remove the podcasts I'd previously copied from the 'cp' line. This
+clearly called for command line argument to let me set the check time
+for something other than 24 hours. Second, I didn't like to copy and
+paste the commands all the time. It turns out that bash can add
+commands to the history list, but only if the script runs as a sourced
+file. This feature resulted in a considerable change. I didn't want to
+litter my bash environment with all the detritus of a script run as a
+sourced file, so newpods now does most of its work as a set of
+functions, and passes the results back to the shell.
+</p>
+<p>
+It also obviously needed a separate configuration file, a man page,
+and a sourceforge project page. I think it's done now...
+</p>
