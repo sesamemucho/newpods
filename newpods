@@ -47,7 +47,6 @@ else
 fi
 
 last_time_filename="${HOME}/.newpods_lasttime"
-
 args=`getopt dhmvqQ $*`
            # you should not use `getopt abo: "$@"` since that would parse
            # the arguments differently from what the set command below does.
@@ -231,7 +230,7 @@ Usage: newpods [-d] [-v] [-h] [-m] [hours]
     -m    Displays a user guide.
 
     hours How far back in time to go to consider a pod file as
-          new. The default value is 24.
+          new. The default value is 24 hours.
 
     newpods shows you which newly-downloaded pod files to copy from
     your host computer to a portable media player.
