@@ -2,7 +2,7 @@
 #
 # Execute this with a '.', so the history commands work
 #
-#       Copyright 2009 Bob Forgey <rforgey.newpods@grumpydogconsulting.com>
+#       Copyright 2009-2014 Bob Forgey <rforgey.newpods@grumpydogconsulting.com>
 #
 #       This program is free software; you can redistribute it and/or modify
 #       it under the terms of the GNU General Public License as published by
@@ -22,10 +22,10 @@
 # Give the user something to look at. Nothing will come out on stdout until
 # the subshell finishes.
 # But don't do it if we have been given a '-Q' flag
-if [[ $(getopt dhmvqQ $*) != *-Q* ]]
+if [[ $(getopt dhmvqQx $*) != *-Q* ]]
 then
     cat - <<EOF
-newpods Copyright (C) 2009 Bob Forgey
+newpods Copyright (C) 2009-2014 Bob Forgey
 This program comes with ABSOLUTELY NO WARRANTY
 This is free software, and you are welcome to redistribute it
 under certain conditions; for details see the file COPYING or
@@ -46,8 +46,42 @@ else
     is_sourced=1
 fi
 
+DEBUG()
+{
+    test $debug -eq 1
+}
+
+# Extract the man page and send it to stdout.
+PrintMan()
+{
+    sed -ne '/^: ...END_OF_MAN_PAGE./,$p' <"$BASH_SOURCE"
+}
+
+# Print the version string to stdout.
+Version()
+{
+    # Maintenance note: don't forget to update date and version number in man page.
+    echo Newpods, version 1.0.0
+}
+
+# This function is used to set the exit code for the main internal subshell.
+# Remember:
+# The exit status is used to indicate what to do with the output
+# captured in newpods_tmp1.$$$$.
+# A status of 3 means we should print out a man page
+# A status of 1 means we should print out something that is already
+# formatted.
+# A status of 0 means we should carry out the standard function: to
+# report on new downloads.
+
+go_byebye()
+{
+    echo \# byebye: $byebye
+    exit $1
+}
+
 last_time_filename="${HOME}/.newpods_lasttime"
-args=`getopt dhmvqQ $*`
+args=`getopt dhmvqQx $*`
            # you should not use `getopt abo: "$@"` since that would parse
            # the arguments differently from what the set command below does.
 
@@ -61,6 +95,7 @@ set -- $args
 debug=0
 nag=1
 use_stattime=change
+exec_after=0
 
 while true ; do
     case "$1" in
@@ -70,6 +105,7 @@ while true ; do
         -m) PrintMan; go_byebye 3;;
         -q) nag=0; shift;;
 	-Q) shift ;;
+        -x) exec_after=1; shift;;
 	--) shift ; break ;;
         *)  Usage "Unrecognized option $1"; go_byebye 2;;
     esac
@@ -93,8 +129,6 @@ elif uname -a | grep -i darwin >& /dev/null; then
     systype="darwin"
 else
     # Probably GNU Linux
-    #f_info="-printf \"%C@ %Cc '%p'\n\""
-    #f_info_trim=33
     if [[ $use_stattime == change ]]; then
         f_info="-exec stat -c '%Z.0 %z \"%n\"' {} \;"
     else
@@ -103,22 +137,6 @@ else
     f_info_trim=37
     systype="gnu"
 fi
-
-# This function is used to set the exit code for the main internal subshell.
-# Remember:
-# The exit status is used to indicate what to do with the output
-# captured in newpods_tmp1.$$$$.
-# A status of 3 means we should print out a man page
-# A status of 1 means we should print out something that is already
-# formatted.
-# A status of 0 means we should carry out the standard function: to
-# report on new downloads.
-
-go_byebye()
-{
-    echo \# byebye: $byebye
-    exit $1
-}
 
 # For a given value and unit (day, hour, or minute), return a display
 # string appropriate to the value. If the value is zero, return ''.
@@ -185,7 +203,7 @@ retrieve_last_time()
         last_run_time=$(( $(date '+%s') - 86400 ))
 	DEBUG && echo Cannot read file \"$last_time_filename\". last_run_time is \"$last_run_time\" >&2
         DEBUG && last_time_filename="${HOME}/.newpods_save"
-        DEBUG && echo HEY\!  last_time_filename is \"${HOME}/.newpods_save\"
+        DEBUG && echo HEY\!  last_time_filename is \"${HOME}/.newpods_save\" >&s
     fi
     local lasttime=$(( $(date '+%s') - last_run_time ))
     DEBUG && echo retrieve_last_time returning $(newpods_seconds_to_timerep $lasttime 'short') >&2
@@ -195,7 +213,7 @@ retrieve_last_time()
 # Set the last time newpods was run. Expects an argument in seconds.
 set_last_time()
 {
-    echo "last time, in seconds, that newpods was run" > "$last_time_filename"
+    echo "last time, in seconds, that newpods was run" > "$last_time_filename" >&2
     echo $1 >> "$last_time_filename"
 }
 
@@ -213,11 +231,6 @@ EOF1
     fi
 }
 
-DEBUG()
-{
-    test $debug -eq 1
-}
-
 Usage()
 {
     echo "$@"
@@ -228,6 +241,7 @@ Usage: newpods [-d] [-v] [-h] [-m] [hours]
     -v    Returns the version.
     -h    Displays this message.
     -m    Displays a user guide.
+    -x    Execute the after-collection command (if defined)
 
     hours How far back in time to go to consider a pod file as
           new. The default value is 24 hours.
@@ -239,23 +253,22 @@ EOF
     nag
 }
 
-# Extract the man page and send it to stdout.
-PrintMan()
-{
-    sed -ne '/^: ...END_OF_MAN_PAGE./,$p' <"$BASH_SOURCE"
-}
-
-# Print the version string to stdout.
-Version()
-{
-    # Maintenance note: don't forget to update date and version number in man page.
-    echo Newpods, version 0.8.0
-}
-
+# Extract definitions from a configuration file.
+#
+# Input:
+#   defname:     The name of the section to extract
+#   cfg_file     The name of the configuration file
+#   default      The value to use if the section is not present
+#   badvalue     If this value is returned, the user has not changed a
+#                configuration definition they need to have changed.
+# Output:
+#   extract_def returns the value(s) defined in `defname' in the
+#   global array `arydef'.
+#
 extract_def()
 {
     local defname="$1"
-    local script="$2"
+    local cfg_file="$2"
     local default="${3:-}"
     local badvalue="${4:-}"
 
@@ -264,9 +277,8 @@ extract_def()
     while read -r; do
         DEBUG && echo "extract_def:    read $REPLY" >&2
         arydef+=("$REPLY")
-    done < <(egrep -v '^( *#|$)' "$script" | sed -ne '/\['"$defname"'\]/,/\(^\[\)/p' | egrep -v '^(\[|[ \t]*$)' | sed -e 's/^[ \t]*//')
-    # done < <(egrep -v '^( *#|$)' "$script" | sed -ne '/\['"$defname"'\]/,/\(^\[\)/p' | sed -ne '/\['"$defname"'\]/,/(^[ \t]*$)/p' | egrep -v '^(\[|[ \t]*$)' | sed -e 's/^[ \t]*//')
-    # The second sed doesn't appear to be needed
+    done < <(egrep -v '^( *#|$)' "$cfg_file" | sed -ne '/\['"$defname"'\]/,/\(^\[\)/p' | egrep -v '^(\[|[ \t]*$)' | sed -e 's/^[ \t]*//')
+
     DEBUG && echo arydef is "${arydef[@]}" sizeof arydef is: ${#arydef[@]} badvalue is \"$badvalue\" >&2
     if [[ ${#arydef[@]} -eq 0 ]]
     then
@@ -285,9 +297,9 @@ extract_def()
         if [[ ${arydef[0]} = $badvalue ]]
         then
             echo Configuration file not changed >&2
-            echo In the configuration file \"$script\", the value of \"$defname\" has not been changed >&2
+            echo In the configuration file \"$cfg_file\", the value of \"$defname\" has not been changed >&2
             echo from the initial default value. >&2
-            echo Please edit the configuration file \"$script\" so that the values match your system >&2
+            echo Please edit the configuration file \"$cfg_file\" so that the values match your system >&2
             return 1
         fi
     fi
@@ -370,6 +382,15 @@ good_extensions=("${arydef[@]}")
 # extracted value is not checked.
 extract_def transfer_command  "$init_loc" "cp -v" ""
 transfer_command="${arydef[0]}"
+
+# Get the after collection command. The default is to use the transfer
+# command , and the extracted value is not checked.
+extract_def after_command  "$init_loc" "true" ""
+after_command="${arydef[0]}"
+if [[ $after_command == true ]]
+then
+    after_command="$transfer_command"
+fi
 
 # Look for the first destination that's present. If none is found
 # (probably because no portable device has been plugged in), the value
@@ -479,14 +500,19 @@ if [[ $is_sourced -eq 1 ]]; then
     # We're running as a sourced script! Yay!
     # Push the handy commands on the history stack. Actually, tell the
     # code at the bottom of the script to do this.
-    echo \# CUT THIS LINE AND BELOW
+    echo \# CUT THIS TO DONE1
     [[ ${#latest_file_list[@]} -ne 0 ]] && echo history -s $transfer_command "${quoted_quoted_latest_file_list[@]}" "\'"$there"\'"
     [[ $there != /dev/null ]] && echo history -s pushd "\'"$there"\'"
     this_cmd=`history 1`
     # Remove the leading command number and spaces
     this_cmd=`echo $this_cmd | sed -e 's/ *[0-9][0-9]* *//'`
     echo history -s $this_cmd
+    echo \# HERE IS DONE1
 fi
+
+    echo \# CUT THIS TO DONE2
+    [[ $exec_after -eq 1 ]] && echo exec_after $transfer_command "${latest_file_list[@]}" "$there"
+    echo \# HERE IS DONE2
 
 set_last_time $now
 
@@ -520,16 +546,34 @@ then
 elif [[ $newpods_status -eq 0 ]]
 then
     # We're OK to continue
-    cat newpods_tmp1.$$$$ | sed -ne '1,/CUT THIS LINE AND BELOW/p' | egrep -v 'CUT THIS LINE AND BELOW'
-    cat newpods_tmp1.$$$$ | sed -ne '/CUT THIS LINE AND BELOW/,$p' | egrep '^history ' >newpods_tmp2.$$$$
+    # Display the list of discovered files
+    cat newpods_tmp1.$$$$ | sed -ne '1,/CUT THIS TO DONE/p' | egrep -v 'CUT THIS TO DONE'
+    # Extract the commands (if any) to be put into the command history list
+    cat newpods_tmp1.$$$$ | sed -ne '/CUT THIS TO DONE1/,/HERE IS DONE1/p' | egrep '^history ' >newpods_tmp2.$$$$
+
+    # Extract the exec_after command (if present) to be run after the files are found
+    cat newpods_tmp1.$$$$ | sed -ne '/CUT THIS TO DONE2/,/HERE IS DONE2/p' | egrep '^exec_after ' >newpods_tmp3.$$$$
 
     # If newpods_tmp2.$$$$ exists and is not empty, then we have some history lines to insert.
     # Otherwise, we are running as a script
     test -s newpods_tmp2.$$$$ && source newpods_tmp2.$$$$
+
+    # If newpods_tmp3.$$$$ exists and is not empty, we have a command to run
+    if [[ -s newpods_tmp3.$$$$ ]]
+    then
+        args=$(grep exec_after newpods_tmp3.$$$$)
+        if [[ -n $args ]]
+        then
+           args=$(echo $args | sed -e 's/^exec_after //')
+           #echo Running after-collection command ${after_command} $args >&2
+           eval ${after_command} ${args}
+        fi
+        unset args
+    fi
 fi
 
 unset newpods_status
-rm -f newpods_tmp1.$$$$ newpods_tmp2.$$$$
+rm -f newpods_tmp1.$$$$ newpods_tmp2.$$$$ newpods_tmp3.$$$$
 
 # Don't call exit() here! If we're running as a sourced file,
 # that would kill the user's terminal session.
@@ -586,234 +630,304 @@ ogg
 # of your script here.
 [transfer_command]
 # default command is:  cp -v
+
+# Should we run a command automatically?
+#
+# By default, the script will just display the command to transfer
+files. If you want this (or some other) command to run automatically,
+put it here.
+[after_command]
+# default command is:  true
 DEFAULT_CONFIGURATION
 
 : <<'END_OF_MAN_PAGE'
-.TH "NEWPODS" "1" "11/24/2009" "newpods 0\&.8\&.0" "Newpods Manual"
-.\" disable hyphenation
-.nh
-.\" disable justification (adjust text to left margin only)
-.ad l
-.SH "NAME"
-newpods \- Find recently downloaded podcasts and suggest useful commands
-.SH "SYNOPSIS"
-\fInewpods\fR  [\-d] [\-h] [\-m] [\-v] [\-q] [\-Q] [timespec]
-.SH "DESCRIPTION"
-For the impatient, see the QUICK START section below.
-
-This script is used to find recently downloaded podcasts, and can
-insert the proper commands into the \fBbash\fP shell's command history
-list to copy them to a portable player into the
-bash history list. The location of the podcast directory tree and the
-location of the portable player are set in the configuration file
-\fI.newpodsrc\fP.
-
-By default, \fBnewpods\fP will look for podcasts that have been
-downloaded since the last time the program was run, or, if
-\fBnewpods\fP has not been run before, in the last 24 hours. This
-search time can be set by giving \fBnewpods\fP a time specification. A
-time specification indicates a time before the current time. Files
-newer than this are considered 'new', and \fBnewpods\fP will create a
-command to copy them to the destination. The format of a time
-specifiction is perhaps most easily shown by example.
+.\" Man page generated from reStructuredText.
+.
+.TH NEWPODS 1 "2014-11-24" "1.0.0" "media processing"
+.SH NAME
+newpods \- generate unix manpages from reStructured text
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.\" TODO: authors and author with name <email>
+.
+.SH SYNOPSIS
 .sp
-.TP
-12
-Indicates 12 hours. A plain integer is interpreted as a number of
-hours.
+newpods [options]
+.SH DESCRIPTION
+.sp
+Newpods is a script that can find recently downloaded podcasts. It
+creates the proper commands to copy them to a portable player and
+inserts the commands into the user\(aqs bash history list, or just runs
+the commands automatically.
+.sp
+For the impatient, see the QUICK START section below.
+.sp
+This script is used to find recently downloaded podcasts, and can
+insert the proper commands into the bash shell\(aqs command history list
+to copy them to a portable player into the bash history list. The
+location of the podcast directory tree and the location of the portable
+player are set in the configuration file .newpodsrc.
+.sp
+By default, newpods will look for podcasts that have been downloaded
+since the last time the program was run, or, if newpods has not been
+run before, in the last 24 hours. This search time can be set by giving
+newpods a time specification. A time specification indicates a time
+before the current time. Files newer than this are considered \(aqnew\(aq,
+and newpods will create a command to copy them to the destination. The
+format of a time specifiction is perhaps most easily shown by example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+12     Indicates 12 hours. A plain integer is interpreted as a number
+       of hours.
 
-.TP
-:30
-Indicates 30 minutes. This may be used with hours, so 7:04 represents
-7 hours and 4 minutes.
 
-.TP
-1d
-A number followed by a 'd' indicates a number of days. A day is the
-same as 24 hours. This may be combined with hours and minutes, so 1d3
-represents 1 day 3 hours, and 1d1:01 represents 1 day 1 hour and 1
-minute.
+:30    Indicates 30 minutes. This may be used with hours, so 7:04
+       represents 7 hours and 4 minutes.
 
-.RS 0
+
+1d     A number followed by a \(aqd\(aq indicates a number of days. A day is
+       the same as 24 hours. This may be combined with hours and
+       minutes, so 1d3 represents 1 day 3 hours, and 1d1:01 represents
+       1 day 1 hour and 1 minute.
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
 There is no restriction on the value of the days or hours parameter,
 but minutes must be between 0 and 59.
-.RE
-
-\fBnewpods\fP
-assumes that podcasts are downloaded into either a single directory
-or a tree of subdirectories underneath a single directory, and that
-podcasts should be copied into a single directory. This
-means \fBnewpods\fP
-will only work with players that support UMS (USB Mass Storage). UMS
-players look just like USB drives on a computer \- they will show up
-as a directory somewhere in the file system. On a Mac, they will
-appear in the /Volumes directory. For example, an iRiver might
-show up as "/Volumes/iRiver U10". \fBnewpods\fP
-handles different players by keeping a list of the directories in
-which each player appears, and then stepping through this list. The
-first directory \fBnewpods\fP
-finds that currently exists on the machine is considered to be the
-target directory for the run.
 .sp
-.sp
-.RS 4
-.nf
+newpods assumes that podcasts are downloaded into either a single
+directory or a tree of subdirectories underneath a single directory,
+and that podcasts should be copied into a single directory. This means
+newpods will only work with devices that show up somewhere in the file
+system. For devices that don\(aqt show up like this, you can send the
+output to a local directory and copy the files to your device from
+there. newpods handles different players by keeping a list of the
+directories in which each player appears, and then stepping through
+this list. The first directory newpods finds that currently exists on
+the machine is considered to be the target directory for the run.
+.INDENT 0.0
+.INDENT 3.5
 newpods
-\&. \<path\-to\-newpods\-file\>/newpods
-.fi
+. <path\-to\-newpods\-file>/newpods
+.UNINDENT
+.UNINDENT
 .sp
-.RE
-In the first form, it finds the newest podcasts, and suggests a
-command to copy them to a portable device. In the second form, the
-script can put these commands into the bash history list, where they
-can be accessed with an up-arrow key. To use the second form, it
-would be most convenient to set up an alias:
+In the first form, it finds the newest podcasts, and suggests a command
+to copy them to a portable device. In the second form, the script can
+put these commands into the bash history list, where they can be
+accessed with an up\-arrow key. To use the second form, it would be most
+convenient to set up an alias:
+.INDENT 0.0
+.INDENT 3.5
 .sp
-.RS 4
 .nf
-alias newpods='. $HOME/bin/newpods'
+.ft C
+alias newpods=\(aq. $HOME/bin/newpods\(aq
+.ft P
 .fi
-.RE
+.UNINDENT
+.UNINDENT
 .sp
-assuming you put \fBnewpods\fP in the bin directory in your home
-directory. Otherwise, replace $HOME/bin with whatever directory you put \fBnewpods\fP in.
+assuming you put newpods in the bin directory in your home directory.
+Otherwise, replace $HOME/bin with whatever directory you put newpods
+in.
 .sp
-\fBNewpods\fP should correctly handle file and directory names that
-contain spaces.
-.SH "OPTIONS"
-.PP
-\-v
-.RS 4
+Newpods also has an option to automatically transfer the files it\(aqs
+found, once you\(aqre comfortable with the way it works. Give a \fB\-x\fP flag
+to newpods, and it will run the \(aqafter_command\(aq (defined in the
+configuration file) after it has found the latest files. If you don\(aqt
+define an after_command, it will use the value of
+\(aqtransfer_command\(aq. If you use the "\-x" flag, you might as well run it
+as a regular script, rather than sourcing it, since you don\(aqt need to
+add anything to the bash command history.
+.sp
+Newpods should correctly handle file and directory names that contain
+spaces. It should also run correctly on Linux, Mac, and BSD systems.
+.SH OPTIONS
+.INDENT 0.0
+.TP
+.B \-v
 Print version information and exit.
-.RE
-.PP
-\-h
-.RS 4
+.TP
+.B \-h
 Print a short help summary and exit.
-.RE
-.PP
-\-m
-.RS 4
+.TP
+.B \-m
 Print a detailed user guide and exit.
-.RE
-.PP
-\-d
-.RS 4
+.TP
+.B \-d
 Prints some extra information while the script runs.
-.RE
-.PP
-\-Q
-.RS 4
+.TP
+.B \-Q
 Disables the display of the copyright and license information.
-.RE
-.PP
-\-q
-.RS 4
-Disables the alias\-nag when \fBnewpods\fP is run as a script.
-.RE
-.SH "QUICK START"
-Run \fBnewpods\fP once. This will create a default configuration file
-named \fI.newpodsrc\fP in your home directory.
-
+.TP
+.B \-q
+Disables the alias\-nag when newpods is run as a script.
+.TP
+.B \-x
+Run the \(aqafter_command\(aq automatically once the recent files have
+been located.
+.UNINDENT
+.SH QUICK START
+.INDENT 0.0
+.IP \(bu 2
+Run newpods once.
+.UNINDENT
+.sp
+This will create a default configuration file named
+\fB\&.newpodsrc\fP in your home directory.
+.INDENT 0.0
+.IP \(bu 2
 Edit the information in this file to match your system.
-.RS 4
-You will need at least to change 'source' (to point to
-wherever your new podcasts are) and 'destinations' (to where you want
-\fBnewpods\fP to copy the podcasts to. If you have more than one
-portable device, make one entry for each device (see examples in
-\fI.newpodsrc\fP for more information).
-.RE
-
+.UNINDENT
+.sp
+You will need at least to change \(aqsource\(aq (to point to wherever
+your new podcasts are) and \(aqdestinations\(aq (to where you want
+newpods to copy the podcasts to. If you have more than one portable
+device, make one entry for each device (see examples in \fB\&.newpodsrc\fP
+for more information).
+.INDENT 0.0
+.IP \(bu 2
 Make an alias:
-.RS 4
-alias newpods='. path-to-newpods'
-
-where \fBpath-to-newpods\fP is wherever the \fBnewpods\fP script is
-located.
-
-If you do it this way (invoking it with a '.'), \fBnewpods\fP will be
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+alias newpods=\(aq. path\-to\-newpods\(aq
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+where path\-to\-newpods is wherever the newpods script is located.
+.sp
+If you do it this way (invoking it with a \(aq.\(aq), newpods will be
 able to put the appropriate commands in the bash history, where you
-can access them with an up-arrow. \fBnewpods\fP does not do any
-copying itself. It puts a 'pushd \fBpath-to-destination\fP' on the
-history list, so you can go delete any files you've already listened
-to, and then a 'cp -v <all the new podcasts> <path-to-destination>',
-to copy them there, once you're satisfied with the current contents
-of your music player.
-.RE
-
+can access them with an up\-arrow. newpods does not do any copying
+itself. It puts a \(aqpushd path\-to\-destination\(aq on the history list,
+so you can go delete any files you\(aqve already listened to, and then
+a \(aqcp \-v <all the new podcasts> <path\-to\-destination>\(aq, to copy
+them there, once you\(aqre satisfied with the current contents of your
+music player.
+.INDENT 0.0
+.IP \(bu 2
 Run it.
-.RS 4
-newpods 24
-
+.UNINDENT
+.SH EXAMPLES
+.INDENT 0.0
+.TP
+.B newpods 24
 will find all the podcasts that have been downloaded in the last 24
 hours.
-
-newpods 2d
-
+.TP
+.B newpods 2d
 will find all the podcasts that have been downloaded in the last 48
 hours.
-
-newpods
-
+.TP
+.B newpods
 will find all the podcasts that have been downloaded since the last
 time newpods was run.
-
-newpods -d
-
-will find all the podcasts that have been downloaded since the last
-time newpods was run and spit out all sorts of information about what
-it's doing.
-
-.RE
-.SH "FILES"
-There is one file associated with \fBnewpods\fP; the configuration
-file \fI.newpodsrc\fP. \fBnewpods\fP will search for this file in
-three locations, and will use the first one it finds. The locations
-are: 1) The user's current directory, 2) the directory that contains
-\fBnewpods\fP, and 3) the user's home directory. For further details,
-see the comments in the file itself.
-
-If this file does not exist, \fBnewpods\fP will create a template
-version in the user's $HOME directory. This template version must be
-edited to put in the correct values for 'source' and 'destinations'
-before \fBnewpods\fP is run again.
-.SH "DIAGNOSTICS"
-The following diagnostics may be issued on stderr:
 .TP
-No configuration value found for "source"
-There was no entry in \fI.newpodsrc\fP for the source tree. There
+.B newpods \-x
+will find all the podcasts that have been downloaded since the last
+time newpods was run and copy them to the destination directory.
+.TP
+.B newpods \-d
+will find all the podcasts that have been downloaded since the last
+time newpods was run and spit out all sorts of information about
+what it\(aqs doing.
+.UNINDENT
+.SH FILES
+.sp
+There is one file associated with newpods; the configuration file
+\fB\&.newpodsrc\fP\&. newpods will search for this file in three locations,
+and will use the first one it finds. The locations are: 1) The user\(aqs
+current directory, 2) the directory that contains newpods, and 3) the
+user\(aqs home directory. For further details, see the comments in the
+file itself.
+.sp
+If this file does not exist, newpods will create a template version in
+the user\(aqs $HOME directory. This template version must be edited to put
+in the correct values for \(aqsource\(aq and \(aqdestinations\(aq before newpods is
+run again.
+.SH DIAGNOSTICS
+.sp
+The following diagnostics may be issued on stderr:
+.INDENT 0.0
+.TP
+.B No configuration value found for "source"
+There was no entry in .newpodsrc for the source tree. There
 needs to be exactly one source tree specified.
 .TP
-No configuration value found for "destinations"
-There was no entry in \fI.newpodsrc\fP for the destination directory. There
-needs to be at least one directory specified.
+.B No configuration value found for "destinations"
+There was no entry in .newpodsrc for the destination directory.
+There needs to be at least one directory specified.
 .TP
-Configuration file not changed
+.B Configuration file not changed
 The rest of the message is: In the configuration file "<name of
-configuration file>", the value of "<source or destinations" has not
-been changed from the initial default value.  Please edit the
-configuration file "<name of configuration file>" so that the values
-match your system.
-
-When \fBnewpods\fP creates a configuration file, it puts in values for
-"source" and "destinations" that it knows can never be correct. These
-values \fImust\fP be changed appropriately for your system. There are
-some suggestions and examples in the configuration file.
+configuration file>", the value of "<source or destinations" has
+not been changed from the initial default value.  Please edit
+the configuration file "<name of configuration file>" so that
+the values match your system.
+.sp
+When newpods creates a configuration file, it puts in values for
+"source" and "destinations" that it knows can never be correct.
+These values must be changed appropriately for your system.
+There are some suggestions and examples in the configuration
+file.
 .TP
-Unrecognized time specifier "<some wrong time spec>"
-\fBnewpods\fP is fairly strict about what it will accept as a time
+.B Unrecognized time specifier "<some wrong time spec>"
+newpods is fairly strict about what it will accept as a time
 value. See above for examples.
 .TP
-Did not find a device to copy to!
-\fBnewpods\fP could not find any of the directories listed in the
-"destinations" section of the configuration file. This could happen if
-the destinations refer to one or more portable music players, none of
-which are currently attached to the computer.
-.SH "BUGS"
-Please report any bugs to the tracker at the Sourceforge project page:
-http://sourceforge.net/projects/newpods/
-.SH "AUTHOR"
-Written by Bob Forgey <\fIrforgey at grumpydogconsulting dot com\fR>
+.B Did not find a device to copy to!
+newpods could not find any of the directories listed in the
+"destinations" section of the configuration file. This could
+happen if the destinations refer to one or more portable music
+players, none of which are currently attached to the computer.
+.UNINDENT
+.SH BUGS
 .sp
-.RE
+Please report any bugs to the tracker at the Github project page:
+\fI\%https://github.com/sesamemucho/newpods/issues\fP
+.SH AUTHOR
+rforgey@grumpydogconsulting.com
+
+License: GPL v3
+.SH COPYRIGHT
+Bob Forgey (C) 2014
+.\" Generated by docutils manpage writer.
+.
 END_OF_MAN_PAGE
