@@ -2,9 +2,9 @@
  newpods
 =========
 
----------------------------------------------
-generate unix manpages from reStructured text
----------------------------------------------
+---------------------------------------------------
+find recently downloaded podcasts and transfer them
+---------------------------------------------------
 
 :Author: rforgey@grumpydogconsulting.com
 :Date:   2014-11-24
